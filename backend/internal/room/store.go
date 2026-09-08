@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Zwx-tech/szesciokonty/backend/internal/match"
 	"github.com/Zwx-tech/szesciokonty/backend/internal/protocol"
 )
 
@@ -42,6 +43,7 @@ type Room struct {
 	Phase protocol.RoomPhase
 	Host  *Player
 	Guest *Player
+	Match *match.Match
 }
 
 type Store struct {
@@ -223,14 +225,84 @@ func (s *Store) Start(code, playerID string) (*Room, error) {
 	if !r.canStart() {
 		return nil, ErrCannotStart
 	}
+	m, err := match.New(
+		match.Seat{ID: r.Host.ID, Army: r.Host.Army},
+		match.Seat{ID: r.Guest.ID, Army: r.Guest.Army},
+	)
+	if err != nil {
+		return nil, err
+	}
+	r.Match = m
 	r.Phase = protocol.PhaseMatch
 	return r, nil
+}
+
+func (s *Store) MatchDiscard(code, playerID, tileID string) (*Room, error) {
+	return s.withMatch(code, func(m *match.Match) error {
+		return m.Discard(playerID, tileID)
+	})
+}
+
+func (s *Store) MatchPlace(code, playerID, tileID string, q, r, facing int) (*Room, error) {
+	return s.withMatch(code, func(m *match.Match) error {
+		return m.Place(playerID, tileID, q, r, facing)
+	})
+}
+
+func (s *Store) MatchEndTurn(code, playerID string) (*Room, error) {
+	return s.withMatch(code, func(m *match.Match) error {
+		return m.EndTurn(playerID)
+	})
+}
+
+func (s *Store) MatchRedrawUnlucky(code, playerID string) (*Room, error) {
+	return s.withMatch(code, func(m *match.Match) error {
+		return m.RedrawUnlucky(playerID)
+	})
+}
+
+func (s *Store) withMatch(code string, fn func(*match.Match) error) (*Room, error) {
+	code = normalizeCode(code)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	room, ok := s.rooms[code]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if room.Match == nil {
+		return nil, ErrNotInRoom
+	}
+	if err := fn(room.Match); err != nil {
+		return nil, err
+	}
+	return room, nil
 }
 
 func (s *Store) Broadcast(r *Room) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.broadcastLocked(r)
+}
+
+func (s *Store) BroadcastAll(r *Room) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.broadcastLocked(r)
+	s.broadcastMatchLocked(r)
+}
+
+func (s *Store) broadcastMatchLocked(r *Room) {
+	if r.Match == nil {
+		return
+	}
+	msg := r.Match.Snapshot()
+	for _, p := range r.players() {
+		if p.Client == nil {
+			continue
+		}
+		p.Client.Send(msg)
+	}
 }
 
 func (s *Store) broadcastLocked(r *Room) {

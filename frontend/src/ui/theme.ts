@@ -14,6 +14,14 @@ export const colors = {
     green: 0x339933,
     yellow: 0xbbaa33,
   },
+  hex: {
+    cell: 0x2a2a2a,
+    stroke: 0x666666,
+    legal: 0x3a553a,
+    selected: 0x55553a,
+    hover: 0x3a3a55,
+    blocked: 0x222222,
+  },
 } as const;
 
 export const fonts = {

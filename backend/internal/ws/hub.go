@@ -1,10 +1,12 @@
 package ws
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"sync"
 
+	"github.com/Zwx-tech/szesciokonty/backend/internal/match"
 	"github.com/Zwx-tech/szesciokonty/backend/internal/protocol"
 	"github.com/Zwx-tech/szesciokonty/backend/internal/room"
 	"github.com/gorilla/websocket"
@@ -66,7 +68,7 @@ func (s *session) Send(msg any) {
 func (s *session) close() {
 	if s.roomCode != "" && s.playerID != "" {
 		if r := s.hub.rooms.Disconnect(s.roomCode, s.playerID); r != nil {
-			s.hub.rooms.Broadcast(r)
+			s.hub.rooms.BroadcastAll(r)
 		}
 	}
 	_ = s.conn.Close()
@@ -94,6 +96,16 @@ func (s *session) handle(data []byte) error {
 		s.setReady(m.Ready)
 	case protocol.Start:
 		s.start()
+	case protocol.Discard:
+		s.discard(m.TileID)
+	case protocol.Place:
+		s.place(m.TileID, m.Q, m.R, m.Facing)
+	case protocol.EndTurn:
+		s.endTurn()
+	case protocol.RedrawUnlucky:
+		s.redrawUnlucky()
+	case protocol.PlayInstant:
+		s.Send(protocol.NewError("not_implemented", "instants arrive in a later task"))
 	default:
 		s.Send(protocol.NewError("not_implemented", "handler not wired yet"))
 	}
@@ -139,7 +151,7 @@ func (s *session) reconnect(code, token string) {
 		return
 	}
 	s.roomCode, s.playerID = r.Code, p.ID
-	s.hub.rooms.Broadcast(r)
+	s.hub.rooms.BroadcastAll(r)
 }
 
 func (s *session) leave() {
@@ -155,7 +167,7 @@ func (s *session) leave() {
 		return
 	}
 	if !closed && rem != nil {
-		s.hub.rooms.Broadcast(rem)
+		s.hub.rooms.BroadcastAll(rem)
 	}
 }
 
@@ -183,30 +195,86 @@ func (s *session) start() {
 		s.fail(err)
 		return
 	}
-	s.hub.rooms.Broadcast(r)
+	s.hub.rooms.BroadcastAll(r)
+}
+
+func (s *session) discard(tileID string) {
+	r, err := s.hub.rooms.MatchDiscard(s.roomCode, s.playerID, tileID)
+	if err != nil {
+		s.fail(err)
+		return
+	}
+	s.hub.rooms.BroadcastAll(r)
+}
+
+func (s *session) place(tileID string, q, rCoord, facing int) {
+	roomRef, err := s.hub.rooms.MatchPlace(s.roomCode, s.playerID, tileID, q, rCoord, facing)
+	if err != nil {
+		s.fail(err)
+		return
+	}
+	s.hub.rooms.BroadcastAll(roomRef)
+}
+
+func (s *session) endTurn() {
+	r, err := s.hub.rooms.MatchEndTurn(s.roomCode, s.playerID)
+	if err != nil {
+		s.fail(err)
+		return
+	}
+	s.hub.rooms.BroadcastAll(r)
+}
+
+func (s *session) redrawUnlucky() {
+	r, err := s.hub.rooms.MatchRedrawUnlucky(s.roomCode, s.playerID)
+	if err != nil {
+		s.fail(err)
+		return
+	}
+	s.hub.rooms.BroadcastAll(r)
 }
 
 func (s *session) fail(err error) {
 	code := "error"
-	switch err {
-	case room.ErrNotFound:
+	switch {
+	case errors.Is(err, room.ErrNotFound):
 		code = "not_found"
-	case room.ErrFull:
+	case errors.Is(err, room.ErrFull):
 		code = "full"
-	case room.ErrStarted:
+	case errors.Is(err, room.ErrStarted):
 		code = "started"
-	case room.ErrNotInRoom:
+	case errors.Is(err, room.ErrNotInRoom):
 		code = "not_in_room"
-	case room.ErrNotHost:
+	case errors.Is(err, room.ErrNotHost):
 		code = "not_host"
-	case room.ErrBadArmy:
+	case errors.Is(err, room.ErrBadArmy):
 		code = "bad_army"
-	case room.ErrCannotStart:
+	case errors.Is(err, room.ErrCannotStart):
 		code = "cannot_start"
-	case room.ErrBadToken:
+	case errors.Is(err, room.ErrBadToken):
 		code = "bad_token"
-	case room.ErrBadName:
+	case errors.Is(err, room.ErrBadName):
 		code = "bad_name"
+	case errors.Is(err, match.ErrNotYourTurn):
+		code = "not_your_turn"
+	case errors.Is(err, match.ErrBadPhase):
+		code = "bad_phase"
+	case errors.Is(err, match.ErrMustDiscard):
+		code = "must_discard"
+	case errors.Is(err, match.ErrBadTile):
+		code = "bad_tile"
+	case errors.Is(err, match.ErrBadHex):
+		code = "bad_hex"
+	case errors.Is(err, match.ErrOccupied):
+		code = "occupied"
+	case errors.Is(err, match.ErrBadFacing):
+		code = "bad_facing"
+	case errors.Is(err, match.ErrNoUnlucky):
+		code = "no_unlucky"
+	case errors.Is(err, match.ErrNotUnit):
+		code = "not_unit"
+	case errors.Is(err, match.ErrHQDone):
+		code = "hq_done"
 	}
 	s.Send(protocol.NewError(code, err.Error()))
 }
