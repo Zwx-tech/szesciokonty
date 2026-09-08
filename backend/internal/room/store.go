@@ -1,0 +1,394 @@
+package room
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"strings"
+	"sync"
+
+	"github.com/Zwx-tech/szesciokonty/backend/internal/protocol"
+)
+
+var (
+	ErrNotFound    = errors.New("room not found")
+	ErrFull        = errors.New("room full")
+	ErrStarted     = errors.New("game already started")
+	ErrNotInRoom   = errors.New("not in a room")
+	ErrNotHost     = errors.New("only host can start")
+	ErrBadArmy     = errors.New("invalid or taken army")
+	ErrCannotStart = errors.New("cannot start yet")
+	ErrBadToken    = errors.New("invalid reconnect token")
+	ErrBadName     = errors.New("invalid name")
+)
+
+type Client interface {
+	Send(msg any)
+}
+
+type Player struct {
+	ID        string
+	Token     string
+	Name      string
+	Army      protocol.Army
+	Ready     bool
+	Connected bool
+	Host      bool
+	Client    Client
+}
+
+type Room struct {
+	Code  string
+	Phase protocol.RoomPhase
+	Host  *Player
+	Guest *Player
+}
+
+type Store struct {
+	mu    sync.Mutex
+	rooms map[string]*Room
+}
+
+func NewStore() *Store {
+	return &Store{rooms: make(map[string]*Room)}
+}
+
+func (s *Store) Create(name string, client Client) (*Room, *Player, error) {
+	name, err := cleanName(name)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	code := s.uniqueCode()
+	p := newPlayer(name, true, client)
+	r := &Room{Code: code, Phase: protocol.PhaseLobby, Host: p}
+	s.rooms[code] = r
+	return r, p, nil
+}
+
+func (s *Store) Join(code, name string, client Client) (*Room, *Player, error) {
+	name, err := cleanName(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	code = normalizeCode(code)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r, ok := s.rooms[code]
+	if !ok {
+		return nil, nil, ErrNotFound
+	}
+	if r.Phase != protocol.PhaseLobby {
+		return nil, nil, ErrStarted
+	}
+	if r.Guest != nil {
+		return nil, nil, ErrFull
+	}
+
+	p := newPlayer(name, false, client)
+	r.Guest = p
+	return r, p, nil
+}
+
+func (s *Store) Reconnect(code, token string, client Client) (*Room, *Player, error) {
+	code = normalizeCode(code)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r, ok := s.rooms[code]
+	if !ok {
+		return nil, nil, ErrNotFound
+	}
+	p := r.playerByToken(token)
+	if p == nil {
+		return nil, nil, ErrBadToken
+	}
+	p.Connected = true
+	p.Client = client
+	return r, p, nil
+}
+
+func (s *Store) Leave(code, playerID string) (closed bool, remaining *Room, err error) {
+	code = normalizeCode(code)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r, ok := s.rooms[code]
+	if !ok {
+		return false, nil, ErrNotFound
+	}
+	p := r.playerByID(playerID)
+	if p == nil {
+		return false, nil, ErrNotInRoom
+	}
+
+	if p.Host {
+		s.notify(r, protocol.NewError("room_closed", "host left"))
+		delete(s.rooms, code)
+		return true, nil, nil
+	}
+
+	r.Guest = nil
+	r.Host.Ready = false
+	return false, r, nil
+}
+
+func (s *Store) Disconnect(code, playerID string) *Room {
+	code = normalizeCode(code)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r, ok := s.rooms[code]
+	if !ok {
+		return nil
+	}
+	p := r.playerByID(playerID)
+	if p == nil {
+		return nil
+	}
+	p.Connected = false
+	p.Client = nil
+	return r
+}
+
+func (s *Store) SetArmy(code, playerID string, army protocol.Army) (*Room, error) {
+	if !validArmy(army) {
+		return nil, ErrBadArmy
+	}
+	code = normalizeCode(code)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r, p, err := s.seat(code, playerID)
+	if err != nil {
+		return nil, err
+	}
+	if r.Phase != protocol.PhaseLobby {
+		return nil, ErrStarted
+	}
+	other := r.other(p)
+	if other != nil && other.Army == army {
+		return nil, ErrBadArmy
+	}
+	p.Army = army
+	p.Ready = false
+	return r, nil
+}
+
+func (s *Store) SetReady(code, playerID string, ready bool) (*Room, error) {
+	code = normalizeCode(code)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r, p, err := s.seat(code, playerID)
+	if err != nil {
+		return nil, err
+	}
+	if r.Phase != protocol.PhaseLobby {
+		return nil, ErrStarted
+	}
+	if ready && p.Army == "" {
+		return nil, ErrCannotStart
+	}
+	p.Ready = ready
+	return r, nil
+}
+
+func (s *Store) Start(code, playerID string) (*Room, error) {
+	code = normalizeCode(code)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r, p, err := s.seat(code, playerID)
+	if err != nil {
+		return nil, err
+	}
+	if !p.Host {
+		return nil, ErrNotHost
+	}
+	if r.Phase != protocol.PhaseLobby {
+		return nil, ErrStarted
+	}
+	if !r.canStart() {
+		return nil, ErrCannotStart
+	}
+	r.Phase = protocol.PhaseMatch
+	return r, nil
+}
+
+func (s *Store) Broadcast(r *Room) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.broadcastLocked(r)
+}
+
+func (s *Store) broadcastLocked(r *Room) {
+	for _, p := range r.players() {
+		if p.Client == nil {
+			continue
+		}
+		p.Client.Send(r.stateFor(p))
+	}
+}
+
+func (s *Store) notify(r *Room, msg any) {
+	for _, p := range r.players() {
+		if p.Client == nil {
+			continue
+		}
+		p.Client.Send(msg)
+	}
+}
+
+func (s *Store) seat(code, playerID string) (*Room, *Player, error) {
+	r, ok := s.rooms[code]
+	if !ok {
+		return nil, nil, ErrNotFound
+	}
+	p := r.playerByID(playerID)
+	if p == nil {
+		return nil, nil, ErrNotInRoom
+	}
+	return r, p, nil
+}
+
+func (s *Store) uniqueCode() string {
+	for {
+		code := randomCode(5)
+		if _, ok := s.rooms[code]; !ok {
+			return code
+		}
+	}
+}
+
+func (r *Room) canStart() bool {
+	return r.Guest != nil &&
+		r.Host.Army != "" && r.Guest.Army != "" &&
+		r.Host.Ready && r.Guest.Ready &&
+		r.Host.Army != r.Guest.Army
+}
+
+func (r *Room) stateFor(p *Player) protocol.RoomState {
+	seats := make([]protocol.Seat, 0, 2)
+	for _, s := range r.players() {
+		seats = append(seats, seatView(s))
+	}
+	return protocol.RoomState{
+		V:        protocol.Version,
+		Type:     protocol.TypeRoomState,
+		Code:     r.Code,
+		Phase:    r.Phase,
+		You:      seatView(p),
+		Token:    p.Token,
+		Seats:    seats,
+		CanStart: r.canStart(),
+	}
+}
+
+func seatView(p *Player) protocol.Seat {
+	return protocol.Seat{
+		ID:        p.ID,
+		Name:      p.Name,
+		Army:      p.Army,
+		Ready:     p.Ready,
+		Connected: p.Connected,
+		Host:      p.Host,
+	}
+}
+
+func (r *Room) players() []*Player {
+	out := make([]*Player, 0, 2)
+	if r.Host != nil {
+		out = append(out, r.Host)
+	}
+	if r.Guest != nil {
+		out = append(out, r.Guest)
+	}
+	return out
+}
+
+func (r *Room) playerByID(id string) *Player {
+	for _, p := range r.players() {
+		if p.ID == id {
+			return p
+		}
+	}
+	return nil
+}
+
+func (r *Room) playerByToken(token string) *Player {
+	for _, p := range r.players() {
+		if p.Token == token {
+			return p
+		}
+	}
+	return nil
+}
+
+func (r *Room) other(p *Player) *Player {
+	if r.Host != nil && r.Host.ID == p.ID {
+		return r.Guest
+	}
+	return r.Host
+}
+
+func newPlayer(name string, host bool, client Client) *Player {
+	return &Player{
+		ID:        randomID(),
+		Token:     randomID(),
+		Name:      name,
+		Connected: true,
+		Host:      host,
+		Client:    client,
+	}
+}
+
+func cleanName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 16 {
+		return "", ErrBadName
+	}
+	return name, nil
+}
+
+func normalizeCode(code string) string {
+	return strings.ToUpper(strings.TrimSpace(code))
+}
+
+func validArmy(a protocol.Army) bool {
+	switch a {
+	case protocol.ArmyRed, protocol.ArmyBlue, protocol.ArmyGreen, protocol.ArmyYellow:
+		return true
+	default:
+		return false
+	}
+}
+
+func randomID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+func randomCode(n int) string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	out := make([]byte, n)
+	for i := 0; i < n; i++ {
+		out[i] = codeAlphabet[int(b[i])%len(codeAlphabet)]
+	}
+	return string(out)
+}

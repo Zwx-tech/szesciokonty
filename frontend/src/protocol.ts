@@ -13,7 +13,14 @@ export type ClientMsg =
   | { v: 1; type: "ready"; ready: boolean }
   | { v: 1; type: "start" }
   | { v: 1; type: "discard"; tileId: string }
-  | { v: 1; type: "place"; tileId: string; q: number; r: number; facing: number }
+  | {
+      v: 1;
+      type: "place";
+      tileId: string;
+      q: number;
+      r: number;
+      facing: number;
+    }
   | {
       v: 1;
       type: "play_instant";
@@ -101,7 +108,9 @@ export type ServerMsg = RoomState | MatchState | ErrorMsg;
 export function parseServerMsg(data: string): ServerMsg {
   const msg = JSON.parse(data) as ServerMsg;
   if (msg.v !== ProtocolVersion) {
-    throw new Error(`unsupported version ${String((msg as { v?: unknown }).v)}`);
+    throw new Error(
+      `unsupported version ${String((msg as { v?: unknown }).v)}`,
+    );
   }
   return msg;
 }

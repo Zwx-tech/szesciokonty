@@ -1,16 +1,11 @@
-import { Application } from "pixi.js";
+import { GameApp } from "./app/GameApp";
 
 async function main() {
-  const app = new Application();
-  await app.init({
-    resizeTo: window,
-    background: "#1a1a1a",
-    antialias: true,
-    resolution: window.devicePixelRatio,
-    autoDensity: true,
-  });
+  const host = document.getElementById("pixi-container");
+  if (!host) throw new Error("#pixi-container missing");
 
-  document.getElementById("pixi-container")!.appendChild(app.canvas);
+  const app = new GameApp();
+  await app.init(host);
 }
 
 main().catch(console.error);

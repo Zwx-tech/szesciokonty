@@ -6,7 +6,12 @@ export class GameSocket {
   private ws: WebSocket | null = null;
   private onMessage: ServerHandler | null = null;
 
+  get isOpen(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
   connect(url = defaultWsURL()): Promise<void> {
+    if (this.isOpen) return Promise.resolve();
     this.close();
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url);
@@ -15,7 +20,11 @@ export class GameSocket {
       ws.onerror = () => reject(new Error("websocket error"));
       ws.onmessage = (ev) => {
         if (typeof ev.data !== "string" || !this.onMessage) return;
-        this.onMessage(parseServerMsg(ev.data));
+        try {
+          this.onMessage(parseServerMsg(ev.data));
+        } catch (err) {
+          console.error(err);
+        }
       };
       ws.onclose = () => {
         this.ws = null;
