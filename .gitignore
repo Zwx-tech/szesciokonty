@@ -1,0 +1,21 @@
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# Backend
+backend/bin/
+backend/server
+
+# Logs / editor
+logs/
+*.log
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# agents stuff
+.agents
+skills-lock.json
