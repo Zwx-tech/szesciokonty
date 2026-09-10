@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Zwx-tech/szesciokonty/backend/internal/match"
 	"github.com/Zwx-tech/szesciokonty/backend/internal/protocol"
@@ -21,7 +22,10 @@ var (
 	ErrCannotStart = errors.New("cannot start yet")
 	ErrBadToken    = errors.New("invalid reconnect token")
 	ErrBadName     = errors.New("invalid name")
+	ErrNoRematch   = errors.New("rematch not available")
 )
+
+const DisconnectGrace = 30 * time.Second
 
 type Client interface {
 	Send(msg any)
@@ -47,12 +51,16 @@ type Room struct {
 }
 
 type Store struct {
-	mu    sync.Mutex
-	rooms map[string]*Room
+	mu       sync.Mutex
+	rooms    map[string]*Room
+	forfeits map[string]*time.Timer // key: code|playerID
 }
 
 func NewStore() *Store {
-	return &Store{rooms: make(map[string]*Room)}
+	return &Store{
+		rooms:    make(map[string]*Room),
+		forfeits: make(map[string]*time.Timer),
+	}
 }
 
 func (s *Store) Create(name string, client Client) (*Room, *Player, error) {
@@ -111,6 +119,7 @@ func (s *Store) Reconnect(code, token string, client Client) (*Room, *Player, er
 	if p == nil {
 		return nil, nil, ErrBadToken
 	}
+	s.cancelForfeitLocked(code, p.ID)
 	p.Connected = true
 	p.Client = client
 	return r, p, nil
@@ -131,14 +140,30 @@ func (s *Store) Leave(code, playerID string) (closed bool, remaining *Room, err 
 		return false, nil, ErrNotInRoom
 	}
 
+	s.cancelForfeitLocked(code, playerID)
+
+	if r.Match != nil && r.Match.Phase != protocol.MatchEnded {
+		r.Match.Forfeit(playerID)
+		s.broadcastMatchLocked(r)
+	}
+
 	if p.Host {
 		s.notify(r, protocol.NewError("room_closed", "host left"))
+		s.clearForfeitsLocked(code)
 		delete(s.rooms, code)
 		return true, nil, nil
 	}
 
 	r.Guest = nil
 	r.Host.Ready = false
+	if r.Phase == protocol.PhaseMatch && r.Match != nil && r.Match.Phase == protocol.MatchEnded {
+		// keep ended match for host result view
+		return false, r, nil
+	}
+	if r.Phase == protocol.PhaseMatch {
+		r.Phase = protocol.PhaseLobby
+		r.Match = nil
+	}
 	return false, r, nil
 }
 
@@ -158,6 +183,9 @@ func (s *Store) Disconnect(code, playerID string) *Room {
 	}
 	p.Connected = false
 	p.Client = nil
+	if r.Match != nil && r.Match.Phase != protocol.MatchEnded {
+		s.scheduleForfeitLocked(code, playerID)
+	}
 	return r
 }
 
@@ -237,6 +265,12 @@ func (s *Store) Start(code, playerID string) (*Room, error) {
 	return r, nil
 }
 
+func (s *Store) MatchPlayInstant(code, playerID, tileID string, q, r *int, facing *int, targetTileID string) (*Room, error) {
+	return s.withMatch(code, func(m *match.Match) error {
+		return m.PlayInstant(playerID, tileID, q, r, facing, targetTileID)
+	})
+}
+
 func (s *Store) MatchDiscard(code, playerID, tileID string) (*Room, error) {
 	return s.withMatch(code, func(m *match.Match) error {
 		return m.Discard(playerID, tileID)
@@ -261,6 +295,80 @@ func (s *Store) MatchRedrawUnlucky(code, playerID string) (*Room, error) {
 	})
 }
 
+func (s *Store) Rematch(code, playerID string) (*Room, error) {
+	code = normalizeCode(code)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r, p, err := s.seat(code, playerID)
+	if err != nil {
+		return nil, err
+	}
+	_ = p
+	if r.Phase != protocol.PhaseMatch || r.Match == nil || r.Match.Phase != protocol.MatchEnded {
+		return nil, ErrNoRematch
+	}
+	r.Match = nil
+	r.Phase = protocol.PhaseLobby
+	r.Host.Ready = false
+	if r.Guest != nil {
+		r.Guest.Ready = false
+	}
+	return r, nil
+}
+
+func forfeitKey(code, playerID string) string {
+	return code + "|" + playerID
+}
+
+func (s *Store) scheduleForfeitLocked(code, playerID string) {
+	key := forfeitKey(code, playerID)
+	if t := s.forfeits[key]; t != nil {
+		t.Stop()
+	}
+	s.forfeits[key] = time.AfterFunc(DisconnectGrace, func() {
+		s.applyForfeit(code, playerID)
+	})
+}
+
+func (s *Store) cancelForfeitLocked(code, playerID string) {
+	key := forfeitKey(code, playerID)
+	if t := s.forfeits[key]; t != nil {
+		t.Stop()
+		delete(s.forfeits, key)
+	}
+}
+
+func (s *Store) clearForfeitsLocked(code string) {
+	prefix := code + "|"
+	for k, t := range s.forfeits {
+		if strings.HasPrefix(k, prefix) {
+			t.Stop()
+			delete(s.forfeits, k)
+		}
+	}
+}
+
+func (s *Store) applyForfeit(code, playerID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := forfeitKey(code, playerID)
+	delete(s.forfeits, key)
+
+	r, ok := s.rooms[code]
+	if !ok || r.Match == nil || r.Match.Phase == protocol.MatchEnded {
+		return
+	}
+	p := r.playerByID(playerID)
+	if p == nil || p.Connected {
+		return
+	}
+	r.Match.Forfeit(playerID)
+	s.broadcastLocked(r)
+	s.broadcastMatchLocked(r)
+}
+
 func (s *Store) withMatch(code string, fn func(*match.Match) error) (*Room, error) {
 	code = normalizeCode(code)
 	s.mu.Lock()
@@ -272,6 +380,9 @@ func (s *Store) withMatch(code string, fn func(*match.Match) error) (*Room, erro
 	}
 	if room.Match == nil {
 		return nil, ErrNotInRoom
+	}
+	if room.Match.Phase == protocol.MatchEnded {
+		return nil, match.ErrBadPhase
 	}
 	if err := fn(room.Match); err != nil {
 		return nil, err

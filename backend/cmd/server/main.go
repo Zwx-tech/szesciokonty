@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/Zwx-tech/szesciokonty/backend/internal/tileapi"
 	"github.com/Zwx-tech/szesciokonty/backend/internal/ws"
 )
 
@@ -18,6 +19,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.Handle("GET /ws", hub.Handler())
+	mux.HandleFunc("GET /api/tiles/{id}", tileapi.Get)
 
 	log.Printf("listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {

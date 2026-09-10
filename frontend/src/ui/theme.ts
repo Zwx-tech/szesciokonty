@@ -14,6 +14,11 @@ export const colors = {
     green: 0x339933,
     yellow: 0xbbaa33,
   },
+  edge: {
+    melee: 0xf0f0f0,
+    ranged: 0x66ccff,
+    net: 0xe8c84a,
+  },
   hex: {
     cell: 0x2a2a2a,
     stroke: 0x666666,
@@ -22,10 +27,4 @@ export const colors = {
     hover: 0x3a3a55,
     blocked: 0x222222,
   },
-} as const;
-
-export const fonts = {
-  family: "Georgia, 'Times New Roman', serif",
-  size: 18,
-  title: 32,
 } as const;

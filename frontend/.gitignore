@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+
+# tiles (everyone can generate them on their own)
+public/tiles

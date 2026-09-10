@@ -1,5 +1,11 @@
 package hex
 
+import (
+	"fmt"
+	"math"
+	"strings"
+)
+
 // Axial helpers shared conceptually with the frontend (q, r). Pointy-top facing 0 = +q.
 
 type Hex struct {
@@ -8,13 +14,52 @@ type Hex struct {
 
 func (h Hex) S() int { return -h.Q - h.R }
 
+type Pt struct{ X, Y float64 }
+
 var Dirs = [6]Hex{
 	{1, 0},
-	{1, -1},
-	{0, -1},
-	{-1, 0},
-	{-1, 1},
 	{0, 1},
+	{-1, 1},
+	{-1, 0},
+	{0, -1},
+	{1, -1},
+}
+
+// Pointy-top axial → pixel (matches frontend hexToPixel).
+const sqrt3 = 1.7320508075688772
+
+// Pointy-top pixel offset for facing dir, matching frontend hexToPixel(HEX_DIRS[dir], size).
+func DirPixel(dir int, size float64) Pt {
+	q, r := Dirs[Mod6(dir)].Q, Dirs[Mod6(dir)].R
+	return Pt{
+		X: size * (sqrt3*float64(q) + (sqrt3/2)*float64(r)),
+		Y: size * ((3.0 / 2.0) * float64(r)),
+	}
+}
+
+func HexCorners(size float64) [6]Pt {
+	var out [6]Pt
+	for i := 0; i < 6; i++ {
+		angle := (math.Pi / 180) * float64(60*i-30)
+		out[i] = Pt{X: size * math.Cos(angle), Y: size * math.Sin(angle)}
+	}
+	return out
+}
+
+func PolyPoints(corners [6]Pt) string {
+	parts := make([]string, 6)
+	for i, c := range corners {
+		parts[i] = fmt.Sprintf("%.2f,%.2f", c.X, c.Y)
+	}
+	return strings.Join(parts, " ")
+}
+
+func Mod6(n int) int {
+	n %= 6
+	if n < 0 {
+		n += 6
+	}
+	return n
 }
 
 func Neighbor(h Hex, facing int) Hex {

@@ -93,12 +93,38 @@ func TestArmyReadyStartReconnect(t *testing.T) {
 	}
 }
 
-func TestStateFor(t *testing.T) {
+func TestRematchAndLeaveForfeit(t *testing.T) {
 	s := NewStore()
-	c := &memClient{}
-	r, host, _ := s.Create("Ada", c)
-	st := r.stateFor(host)
-	if st.Type != protocol.TypeRoomState || st.Token != host.Token || !st.You.Host {
-		t.Fatalf("%+v", st)
+	hostC, guestC := &memClient{}, &memClient{}
+	r, host, _ := s.Create("Ada", hostC)
+	_, guest, _ := s.Join(r.Code, "Bob", guestC)
+	_, _ = s.SetArmy(r.Code, host.ID, protocol.ArmyRed)
+	_, _ = s.SetArmy(r.Code, guest.ID, protocol.ArmyBlue)
+	_, _ = s.SetReady(r.Code, host.ID, true)
+	_, _ = s.SetReady(r.Code, guest.ID, true)
+	r, err := s.Start(r.Code, host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r.Match.Forfeit(guest.ID)
+	r, err = s.Rematch(r.Code, host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Phase != protocol.PhaseLobby || r.Match != nil || r.Host.Ready || r.Guest.Ready {
+		t.Fatalf("rematch lobby: %+v ready h/g=%v/%v", r.Phase, r.Host.Ready, r.Guest.Ready)
+	}
+
+	_, _ = s.SetReady(r.Code, host.ID, true)
+	_, _ = s.SetReady(r.Code, guest.ID, true)
+	r, _ = s.Start(r.Code, host.ID)
+
+	closed, rem, err := s.Leave(r.Code, guest.ID)
+	if err != nil || closed || rem == nil {
+		t.Fatalf("leave: %v %v %v", closed, rem, err)
+	}
+	if rem.Match == nil || rem.Match.Phase != protocol.MatchEnded || rem.Match.Result.WinnerID != host.ID {
+		t.Fatalf("want forfeit win for host, got %+v", rem.Match)
 	}
 }

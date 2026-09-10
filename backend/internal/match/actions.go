@@ -89,7 +89,7 @@ func (m *Match) placeUnit(playerID, tileID string, q, r, facing int) error {
 	m.UnluckyAvailable = false
 
 	if len(m.Board) >= len(hex.BoardCells(boardRadius)) {
-		m.enterBattleStub()
+		m.resolveBattle()
 	}
 	return nil
 }
@@ -124,7 +124,7 @@ func (m *Match) EndTurn(playerID string) error {
 	if m.MustDiscard {
 		return ErrMustDiscard
 	}
-	m.advanceTurn()
+	m.afterPlayerEndedTurn(playerID)
 	return nil
 }
 
@@ -198,6 +198,7 @@ func (m *Match) drawUpTo(p *Player, n int) {
 		t := p.Deck[0]
 		p.Deck = p.Deck[1:]
 		p.Hand = append(p.Hand, t)
+		m.noteDeckExhausted(p)
 	}
 }
 
@@ -218,14 +219,6 @@ func (m *Match) checkUnlucky(p *Player) {
 	m.UnluckyAvailable = true
 }
 
-func (m *Match) enterBattleStub() {
-	// Full battle resolution arrives in t11; board-full ends the turn.
-	m.Phase = protocol.MatchBattle
-	m.Phase = protocol.MatchTurn
-	m.MustDiscard = false
-	m.UnluckyAvailable = false
-	m.advanceTurn()
-}
 
 func (m *Match) other(id string) *Player {
 	for _, p := range m.Players {

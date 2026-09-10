@@ -105,7 +105,9 @@ func (s *session) handle(data []byte) error {
 	case protocol.RedrawUnlucky:
 		s.redrawUnlucky()
 	case protocol.PlayInstant:
-		s.Send(protocol.NewError("not_implemented", "instants arrive in a later task"))
+		s.playInstant(m)
+	case protocol.Rematch:
+		s.rematch()
 	default:
 		s.Send(protocol.NewError("not_implemented", "handler not wired yet"))
 	}
@@ -234,6 +236,26 @@ func (s *session) redrawUnlucky() {
 	s.hub.rooms.BroadcastAll(r)
 }
 
+func (s *session) playInstant(m protocol.PlayInstant) {
+	r, err := s.hub.rooms.MatchPlayInstant(
+		s.roomCode, s.playerID, m.TileID, m.Q, m.R, m.Facing, m.TargetTileID,
+	)
+	if err != nil {
+		s.fail(err)
+		return
+	}
+	s.hub.rooms.BroadcastAll(r)
+}
+
+func (s *session) rematch() {
+	r, err := s.hub.rooms.Rematch(s.roomCode, s.playerID)
+	if err != nil {
+		s.fail(err)
+		return
+	}
+	s.hub.rooms.Broadcast(r)
+}
+
 func (s *session) fail(err error) {
 	code := "error"
 	switch {
@@ -275,6 +297,14 @@ func (s *session) fail(err error) {
 		code = "not_unit"
 	case errors.Is(err, match.ErrHQDone):
 		code = "hq_done"
+	case errors.Is(err, match.ErrNotInstant):
+		code = "not_instant"
+	case errors.Is(err, match.ErrBadTarget):
+		code = "bad_target"
+	case errors.Is(err, match.ErrNoBattle):
+		code = "no_battle"
+	case errors.Is(err, room.ErrNoRematch):
+		code = "no_rematch"
 	}
 	s.Send(protocol.NewError(code, err.Error()))
 }

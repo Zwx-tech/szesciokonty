@@ -49,14 +49,21 @@ export type Hex = { q: number; r: number };
 export type BoardTile = {
   id: string;
   defId: string;
+  kind: string;
   ownerId: string;
   q: number;
   r: number;
   facing: number;
   wounds: number;
+  edges?: EdgeMark[];
 };
 
-export type HandTile = { id: string; defId: string };
+export type EdgeMark = {
+  dir: number;
+  kind: "melee" | "ranged" | "net" | string;
+};
+
+export type HandTile = { id: string; defId: string; kind: string };
 
 export type PlayerView = {
   id: string;

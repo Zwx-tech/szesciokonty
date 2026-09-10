@@ -61,8 +61,13 @@ type Match struct {
 	FirstPlayerID    string
 	MustDiscard      bool
 	UnluckyAvailable bool
+	Result           *protocol.MatchResult
 	openingStep      int
 	drawnIDs         []string
+	pendingDestroy   map[string]bool
+	endMode          endMode
+	deckExhaustedBy  string
+	tieTurnsLeft     int
 }
 
 type Seat struct {
@@ -131,16 +136,28 @@ func (m *Match) player(id string) *Player {
 func (m *Match) Snapshot() protocol.MatchState {
 	board := make([]protocol.BoardTile, 0, len(m.Board))
 	for _, t := range m.Board {
+		kind := ""
+		var edges []protocol.EdgeMark
+		if p := m.player(t.OwnerID); p != nil {
+			if d := p.Pack.Def(t.DefID); d != nil {
+				kind = string(d.Kind)
+				edges = edgeMarks(d, t.Facing)
+			}
+		}
 		board = append(board, protocol.BoardTile{
-			ID: t.ID, DefID: t.DefID, OwnerID: t.OwnerID,
-			Q: t.Q, R: t.R, Facing: t.Facing, Wounds: t.Wounds,
+			ID: t.ID, DefID: t.DefID, Kind: kind, OwnerID: t.OwnerID,
+			Q: t.Q, R: t.R, Facing: t.Facing, Wounds: t.Wounds, Edges: edges,
 		})
 	}
 	players := make([]protocol.PlayerView, 0, 2)
 	for _, p := range m.Players {
 		hand := make([]protocol.HandTile, len(p.Hand))
 		for i, t := range p.Hand {
-			hand[i] = protocol.HandTile{ID: t.ID, DefID: t.DefID}
+			kind := ""
+			if d := p.Pack.Def(t.DefID); d != nil {
+				kind = string(d.Kind)
+			}
+			hand[i] = protocol.HandTile{ID: t.ID, DefID: t.DefID, Kind: kind}
 		}
 		players = append(players, protocol.PlayerView{
 			ID: p.ID, Army: p.Army, HQHP: p.HQHP,
@@ -157,7 +174,33 @@ func (m *Match) Snapshot() protocol.MatchState {
 		Board:            board,
 		Players:          players,
 		LegalHexes:       m.legalHexes(),
+		Result:           m.Result,
 	}
+}
+
+func edgeMarks(d *tile.Def, facing int) []protocol.EdgeMark {
+	var out []protocol.EdgeMark
+	for _, c := range d.ComponentsOf(tile.CompAttack) {
+		kind := "melee"
+		if c.AttackType == tile.AttackRanged {
+			kind = "ranged"
+		}
+		for _, rel := range c.Dirs {
+			out = append(out, protocol.EdgeMark{
+				Dir:  (facing + rel) % 6,
+				Kind: kind,
+			})
+		}
+	}
+	for _, c := range d.ComponentsOf(tile.CompNet) {
+		for _, rel := range c.Dirs {
+			out = append(out, protocol.EdgeMark{
+				Dir:  (facing + rel) % 6,
+				Kind: "net",
+			})
+		}
+	}
+	return out
 }
 
 func (m *Match) legalHexes() []protocol.Hex {

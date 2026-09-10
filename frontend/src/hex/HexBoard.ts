@@ -1,17 +1,24 @@
-import { Container, Graphics } from "pixi.js";
+import { Container, Graphics, Sprite } from "pixi.js";
 import {
   BOARD_CELLS,
   hexCorners,
   hexEq,
   hexKey,
   hexToPixel,
-  onBoard,
   type Hex,
 } from "./coords";
+import { loadTileTexture, TILE_SVG_HEX_SIZE } from "./tileAssets";
 import { colors } from "../ui/theme";
 
 export type HexBoardOpts = {
   size?: number;
+};
+
+export type Occupant = {
+  q: number;
+  r: number;
+  defId: string;
+  facing: number;
 };
 
 type CellGfx = {
@@ -22,23 +29,27 @@ type CellGfx = {
 export class HexBoard extends Container {
   private size: number;
   private cells = new Map<string, CellGfx>();
+  private tokens = new Container();
   private legal = new Set<string>();
   private selected: Hex | null = null;
   private hover: Hex | null = null;
+  private occupants: Occupant[] = [];
+  private paintGen = 0;
   onPick: ((hex: Hex) => void) | null = null;
 
   constructor(opts: HexBoardOpts = {}) {
     super();
     this.size = opts.size ?? 36;
     this.build();
+    this.addChild(this.tokens);
   }
 
   setSize(size: number): void {
     this.size = size;
     this.rebuild();
+    this.paintTokens();
   }
 
-  /** Scale hex size so the board fits inside maxW×maxH (with padding). */
   fit(maxW: number, maxH: number, padding = 16): void {
     const extent = boardPixelExtent(2);
     const size = Math.min(
@@ -63,13 +74,15 @@ export class HexBoard extends Container {
     this.redrawAll();
   }
 
-  getSelected(): Hex | null {
-    return this.selected;
+  setOccupants(occupants: Occupant[]): void {
+    this.occupants = occupants;
+    this.paintTokens();
   }
 
   private build(): void {
     this.cells.clear();
     this.removeChildren();
+    this.tokens = new Container();
     for (const hex of BOARD_CELLS) {
       const gfx = new Graphics();
       gfx.eventMode = "static";
@@ -90,6 +103,7 @@ export class HexBoard extends Container {
       this.cells.set(hexKey(hex), { hex, gfx });
       this.paint(hex);
     }
+    this.addChild(this.tokens);
   }
 
   private rebuild(): void {
@@ -126,6 +140,58 @@ export class HexBoard extends Container {
     g.position.set(x, y);
     g.cursor = isLegal ? "pointer" : "default";
   }
+
+  private paintTokens(): void {
+    const gen = ++this.paintGen;
+    const occupants = this.occupants;
+    void this.renderTokens(gen, occupants);
+  }
+
+  private clearTokenChildren(): void {
+    for (const child of this.tokens.removeChildren()) {
+      child.destroy({ children: true, texture: false });
+    }
+  }
+
+  private async renderTokens(
+    gen: number,
+    occupants: Occupant[],
+  ): Promise<void> {
+    if (occupants.length === 0) {
+      if (gen === this.paintGen) this.clearTokenChildren();
+      return;
+    }
+
+    let textures;
+    try {
+      textures = await Promise.all(
+        occupants.map((o) => loadTileTexture(o.defId)),
+      );
+    } catch (err) {
+      console.warn("Failed to load tile SVGs", err);
+      return;
+    }
+    if (gen !== this.paintGen) return;
+
+    this.clearTokenChildren();
+    const tokenSize = this.size * 0.82;
+    const scale = tokenSize / TILE_SVG_HEX_SIZE;
+
+    for (let i = 0; i < occupants.length; i++) {
+      const o = occupants[i]!;
+      const texture = textures[i]!;
+      const { x, y } = hexToPixel({ q: o.q, r: o.r }, this.size);
+      const sprite = new Sprite({
+        texture,
+        anchor: 0.5,
+        eventMode: "none",
+      });
+      sprite.scale.set(scale);
+      sprite.rotation = (((o.facing % 6) + 6) % 6) * (Math.PI / 3);
+      sprite.position.set(x, y);
+      this.tokens.addChild(sprite);
+    }
+  }
 }
 
 function boardPixelExtent(radius: number): { w: number; h: number } {
@@ -134,8 +200,4 @@ function boardPixelExtent(radius: number): { w: number; h: number } {
     w: sqrt3 * (2 * radius + 1),
     h: 2 + 1.5 * 2 * radius,
   };
-}
-
-export function parseHex(h: Hex): Hex | null {
-  return onBoard(h) ? h : null;
 }

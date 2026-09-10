@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "npm run dev",
-    "build": "npm run lint && tsc && vite build",
+    "generate:tiles": "cd ../backend && go run ./cmd/gentiles ../frontend/public/tiles",
+    "build": "npm run generate:tiles && npm run lint && tsc && vite build",
     "lint": "eslint .",
     "dev": "vite"
   },

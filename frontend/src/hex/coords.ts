@@ -19,11 +19,11 @@ export function hexS(h: Hex): number {
 /** Pointy-top neighbor order matches facing 0..5 (E, NE, NW, W, SW, SE). */
 export const HEX_DIRS: readonly Hex[] = [
   { q: 1, r: 0 },
-  { q: 1, r: -1 },
-  { q: 0, r: -1 },
-  { q: -1, r: 0 },
-  { q: -1, r: 1 },
   { q: 0, r: 1 },
+  { q: -1, r: 1 },
+  { q: -1, r: 0 },
+  { q: 0, r: -1 },
+  { q: 1, r: -1 },
 ];
 
 export function hexAdd(a: Hex, b: Hex): Hex {

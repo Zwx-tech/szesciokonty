@@ -147,18 +147,27 @@ type Hex struct {
 }
 
 type BoardTile struct {
-	ID      string `json:"id"`
-	DefID   string `json:"defId"`
-	OwnerID string `json:"ownerId"`
-	Q       int    `json:"q"`
-	R       int    `json:"r"`
-	Facing  int    `json:"facing"`
-	Wounds  int    `json:"wounds"`
+	ID      string     `json:"id"`
+	DefID   string     `json:"defId"`
+	Kind    string     `json:"kind"`
+	OwnerID string     `json:"ownerId"`
+	Q       int        `json:"q"`
+	R       int        `json:"r"`
+	Facing  int        `json:"facing"`
+	Wounds  int        `json:"wounds"`
+	Edges   []EdgeMark `json:"edges,omitempty"`
+}
+
+// EdgeMark is an absolute board-side icon (0..5) for rendering.
+type EdgeMark struct {
+	Dir  int    `json:"dir"`
+	Kind string `json:"kind"` // melee | ranged | net
 }
 
 type HandTile struct {
 	ID    string `json:"id"`
 	DefID string `json:"defId"`
+	Kind  string `json:"kind"`
 }
 
 type PlayerView struct {

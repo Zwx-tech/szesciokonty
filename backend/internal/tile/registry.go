@@ -22,6 +22,15 @@ func PackFor(army protocol.Army) (*Pack, error) {
 	return p, nil
 }
 
+func DefByID(id string) *Def {
+	for _, p := range packs {
+		if d := p.Def(id); d != nil {
+			return d
+		}
+	}
+	return nil
+}
+
 func Armies() []protocol.Army {
 	return []protocol.Army{
 		protocol.ArmyRed,
