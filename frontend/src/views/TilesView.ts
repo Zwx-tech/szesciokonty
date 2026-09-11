@@ -2,6 +2,7 @@ import { el, clear } from "../dom/dom";
 import { View } from "../app/View";
 import type { ViewRouter } from "../app/ViewRouter";
 import type { Army } from "../protocol";
+import { fetchTileDef } from "../tiles/catalog";
 
 type ManifestEntry = { id: string; kind: string; file: string };
 type Manifest = { armies: Record<string, ManifestEntry[]> };
@@ -133,16 +134,14 @@ export class TilesView extends View {
     this.panelJson.textContent = "Loading…";
 
     const seq = ++this.fetchSeq;
-    try {
-      const res = await fetch(`/api/tiles/${encodeURIComponent(id)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: unknown = await res.json();
-      if (seq !== this.fetchSeq) return;
-      this.panelJson.textContent = JSON.stringify(data, null, 2);
-    } catch (err) {
-      if (seq !== this.fetchSeq) return;
-      this.panelJson.textContent = `Failed to load tile from backend:\n${String(err)}\n\nIs the Go server running?`;
+    const def = await fetchTileDef(id);
+    if (seq !== this.fetchSeq) return;
+    if (!def) {
+      this.panelJson.textContent =
+        "Failed to load tile from backend.\n\nIs the Go server running?";
+      return;
     }
+    this.panelJson.textContent = JSON.stringify(def, null, 2);
   }
 
   private clearPanel(): void {

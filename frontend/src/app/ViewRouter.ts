@@ -3,15 +3,25 @@ import { View, type ViewId } from "./View";
 import { NameView } from "../views/NameView";
 import { HubView } from "../views/HubView";
 import { LobbyView } from "../views/LobbyView";
-import { TableView } from "../views/TableView";
+import { TableView } from "../table/TableView";
 import { ResultView } from "../views/ResultView";
 import { TilesView } from "../views/TilesView";
+
+type ViewFactory = (router: ViewRouter) => View;
 
 export class ViewRouter {
   readonly session: Session;
   private readonly host: HTMLElement;
   private current: View | null = null;
   private currentId: ViewId | null = null;
+  private readonly registry: Record<ViewId, ViewFactory> = {
+    name: (r) => new NameView(r),
+    hub: (r) => new HubView(r),
+    lobby: (r) => new LobbyView(r),
+    table: (r) => new TableView(r),
+    result: (r) => new ResultView(r),
+    tiles: (r) => new TilesView(r),
+  };
 
   constructor(session: Session, host: HTMLElement) {
     this.session = session;
@@ -74,19 +84,7 @@ export class ViewRouter {
   }
 
   private create(id: ViewId): View {
-    switch (id) {
-      case "name":
-        return new NameView(this);
-      case "hub":
-        return new HubView(this);
-      case "lobby":
-        return new LobbyView(this);
-      case "table":
-        return new TableView(this);
-      case "result":
-        return new ResultView(this);
-      case "tiles":
-        return new TilesView(this);
-    }
+    const factory = this.registry[id];
+    return factory(this);
   }
 }

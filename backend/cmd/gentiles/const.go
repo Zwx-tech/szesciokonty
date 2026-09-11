@@ -46,6 +46,23 @@ const (
 	linkScaleY = 0.4
 )
 
+// * Barrier (armor) — curved band along the protected edge
+const (
+	barrierScaleX   = 0    // inset from each corner along the edge
+	barrierScaleY   = 0.2  // inward thickness at the middle (fraction of radius)
+	barrierOuterPad = 0.97 // pull outer curve slightly inside the hex stroke
+	barrierStroke   = "#eeeeee"
+	barrierStrokeW  = 0.5
+)
+
+// * Line wound (pierce) — long thin triangle, distinct from normal ranged
+const (
+	lineWoundScaleX      = 0.37
+	lineWoundScaleY      = 0.15
+	lineWoundStroke      = "#999999"
+	lineWoundStrokeWidth = 2
+)
+
 // Label typography
 const (
 	labelFontFamily = "Georgia, serif"
@@ -74,6 +91,7 @@ const (
 	ShapeTriangle EdgeShapeType = "triangle"
 	ShapeHidden   EdgeShapeType = "hidden"
 	ShapeLink     EdgeShapeType = "link"
+	ShapeBarrier  EdgeShapeType = "barrier"
 )
 
 type ComponentDrawParams struct {
@@ -83,6 +101,7 @@ type ComponentDrawParams struct {
 	Fill      string
 	Stroke    string
 	StrokeW   float64
+	Dirs      []int // optional override when the component has no Dirs (e.g. line wound)
 }
 
 var armyFill = map[protocol.Army]string{
@@ -93,16 +112,20 @@ var armyFill = map[protocol.Army]string{
 }
 
 var componentFill = map[string]string{
-	"melee":  "#f0f0f0",
-	"ranged": "#f0f0f0",
-	"net":    "#e8c84a",
-	"link":   "#f0f0f0",
+	"melee":      "#f0f0f0",
+	"ranged":     "#f0f0f0",
+	"net":        "#e8c84a",
+	"link":       "#f0f0f0",
+	"barrier":    "#222222",
+	"line_wound": "#f0f0f0",
 }
 
-// Draw priority: nets under ranged under melee.
+// Draw priority: lower drawn first (underneath).
 var componentDrawOrder = map[string]int{
-	"net":    0,
-	"ranged": 1,
-	"melee":  2,
-	"link":   3,
+	"barrier":    0,
+	"net":        1,
+	"melee":      2,
+	"ranged":     3,
+	"line_wound": 4,
+	"link":       5,
 }

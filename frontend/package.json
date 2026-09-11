@@ -8,9 +8,12 @@
     "generate:tiles": "cd ../backend && go run ./cmd/gentiles ../frontend/public/tiles",
     "build": "npm run generate:tiles && npm run lint && tsc && vite build",
     "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "dev": "vite"
   },
   "dependencies": {
+    "lit": "^3.3.3",
     "pixi.js": "^8.8.1"
   },
   "devDependencies": {
@@ -21,6 +24,7 @@
     "prettier": "^3.5.3",
     "typescript": "~5.7.3",
     "typescript-eslint": "^8.25.0",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "vitest": "^3.2.7"
   }
 }

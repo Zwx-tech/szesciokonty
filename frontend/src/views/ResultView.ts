@@ -66,6 +66,12 @@ export class ResultView extends View {
 
   private hpLine(match: typeof this.session.match): string {
     if (!match) return "";
-    return match.players.map((p) => `${p.army} HQ ${p.hqHp}`).join(" · ");
+    const room = this.session.room;
+    return match.players
+      .map((p) => {
+        const name = room?.seats.find((s) => s.id === p.id)?.name ?? p.army;
+        return `${name} (${p.army}) HQ ${p.hqHp}`;
+      })
+      .join(" · ");
   }
 }

@@ -106,6 +106,12 @@ func (s *session) handle(data []byte) error {
 		s.redrawUnlucky()
 	case protocol.PlayInstant:
 		s.playInstant(m)
+	case protocol.UseMobility:
+		s.useMobility(m)
+	case protocol.UseRecon:
+		s.useRecon()
+	case protocol.UseQuartermaster:
+		s.useQuartermaster(m.TileID)
 	case protocol.Rematch:
 		s.rematch()
 	default:
@@ -238,8 +244,37 @@ func (s *session) redrawUnlucky() {
 
 func (s *session) playInstant(m protocol.PlayInstant) {
 	r, err := s.hub.rooms.MatchPlayInstant(
-		s.roomCode, s.playerID, m.TileID, m.Q, m.R, m.Facing, m.TargetTileID,
+		s.roomCode, s.playerID, m.TileID, m.Q, m.R, m.Facing, m.TargetTileID, m.PassengerID,
 	)
+	if err != nil {
+		s.fail(err)
+		return
+	}
+	s.hub.rooms.BroadcastAll(r)
+}
+
+func (s *session) useMobility(m protocol.UseMobility) {
+	r, err := s.hub.rooms.MatchUseMobility(
+		s.roomCode, s.playerID, m.TileID, m.Q, m.R, m.Facing, m.PassengerID,
+	)
+	if err != nil {
+		s.fail(err)
+		return
+	}
+	s.hub.rooms.BroadcastAll(r)
+}
+
+func (s *session) useRecon() {
+	r, err := s.hub.rooms.MatchUseRecon(s.roomCode, s.playerID)
+	if err != nil {
+		s.fail(err)
+		return
+	}
+	s.hub.rooms.BroadcastAll(r)
+}
+
+func (s *session) useQuartermaster(tileID string) {
+	r, err := s.hub.rooms.MatchUseQuartermaster(s.roomCode, s.playerID, tileID)
 	if err != nil {
 		s.fail(err)
 		return
@@ -303,6 +338,14 @@ func (s *session) fail(err error) {
 		code = "bad_target"
 	case errors.Is(err, match.ErrNoBattle):
 		code = "no_battle"
+	case errors.Is(err, match.ErrNoMobility):
+		code = "no_mobility"
+	case errors.Is(err, match.ErrNoRecon):
+		code = "no_recon"
+	case errors.Is(err, match.ErrNoQuartermaster):
+		code = "no_quartermaster"
+	case errors.Is(err, match.ErrBadPassenger):
+		code = "bad_passenger"
 	case errors.Is(err, room.ErrNoRematch):
 		code = "no_rematch"
 	}

@@ -14,7 +14,7 @@ var (
 	ErrNoBattle   = errors.New("battle tile not allowed")
 )
 
-func (m *Match) PlayInstant(playerID, tileID string, q, r *int, facing *int, targetTileID string) error {
+func (m *Match) PlayInstant(playerID, tileID string, q, r *int, facing *int, targetTileID, passengerTileID string) error {
 	if playerID != m.TurnPlayerID {
 		return ErrNotYourTurn
 	}
@@ -24,6 +24,7 @@ func (m *Match) PlayInstant(playerID, tileID string, q, r *int, facing *int, tar
 	if m.MustDiscard {
 		return ErrMustDiscard
 	}
+	m.clearReconPeek()
 
 	p := m.player(playerID)
 	inst, idx := takeHand(p, tileID)
@@ -41,7 +42,7 @@ func (m *Match) PlayInstant(playerID, tileID string, q, r *int, facing *int, tar
 	case tile.InstantBattle:
 		err = m.playBattle()
 	case tile.InstantMove:
-		err = m.playMove(playerID, targetTileID, q, r, facing)
+		err = m.playMove(playerID, targetTileID, q, r, facing, passengerTileID)
 	case tile.InstantPush:
 		err = m.playPush(playerID, targetTileID, q, r)
 	case tile.InstantSniper:
@@ -60,6 +61,7 @@ func (m *Match) PlayInstant(playerID, tileID string, q, r *int, facing *int, tar
 
 	p.Discard = append(p.Discard, *inst)
 	m.UnluckyAvailable = false
+	m.appendLog("Played %s", shortDefID(inst.DefID))
 	return nil
 }
 
@@ -71,38 +73,23 @@ func (m *Match) playBattle() error {
 	return nil
 }
 
-func (m *Match) playMove(playerID, targetID string, q, r *int, facing *int) error {
+func (m *Match) playMove(playerID, targetID string, q, r *int, facing *int, passengerTileID string) error {
 	t := m.boardByID(targetID)
 	if t == nil || t.OwnerID != playerID {
 		return ErrBadTarget
 	}
-
-	newQ, newR := t.Q, t.R
-	if q != nil && r != nil {
-		newQ, newR = *q, *r
-		if !hex.OnBoard(hex.Hex{Q: newQ, R: newR}, boardRadius) {
-			return ErrBadHex
-		}
-		if newQ != t.Q || newR != t.R {
-			if hexDist(t.Q, t.R, newQ, newR) != 1 {
-				return ErrBadHex
-			}
-			if _, taken := m.Board[key(newQ, newR)]; taken {
-				return ErrOccupied
-			}
-		}
-	}
-	newFacing := t.Facing
-	if facing != nil {
-		if *facing < 0 || *facing > 5 {
-			return ErrBadFacing
-		}
-		newFacing = *facing
+	if def := m.defOf(t); def != nil && def.HasSpecial(tile.SpecialBlocker) {
+		return ErrBadTarget
 	}
 
-	delete(m.Board, key(t.Q, t.R))
-	t.Q, t.R, t.Facing = newQ, newR, newFacing
-	m.Board[key(newQ, newR)] = t
+	oldQ, oldR, oldFacing := t.Q, t.R, t.Facing
+	if err := m.relocateUnit(t, q, r, facing); err != nil {
+		return err
+	}
+	if err := m.tryTransportPassenger(playerID, t, oldQ, oldR, passengerTileID); err != nil {
+		t.Q, t.R, t.Facing = oldQ, oldR, oldFacing
+		return err
+	}
 	return nil
 }
 
@@ -112,6 +99,9 @@ func (m *Match) playPush(playerID, targetID string, q, r *int) error {
 	}
 	t := m.boardByID(targetID)
 	if t == nil || t.OwnerID == playerID {
+		return ErrBadTarget
+	}
+	if def := m.defOf(t); def != nil && def.HasSpecial(tile.SpecialBlocker) {
 		return ErrBadTarget
 	}
 	if !m.adjacentToFriendly(playerID, t.Q, t.R) {
@@ -124,13 +114,13 @@ func (m *Match) playPush(playerID, targetID string, q, r *int) error {
 	if hexDist(t.Q, t.R, dest.Q, dest.R) != 1 {
 		return ErrBadHex
 	}
-	if _, taken := m.Board[key(dest.Q, dest.R)]; taken {
+	if m.hexOccupied(dest.Q, dest.R) {
 		return ErrOccupied
 	}
 
-	delete(m.Board, key(t.Q, t.R))
+	m.removeTile(t)
 	t.Q, t.R = dest.Q, dest.R
-	m.Board[key(dest.Q, dest.R)] = t
+	m.setTile(t)
 	return nil
 }
 
@@ -139,8 +129,25 @@ func (m *Match) playSniper(playerID, targetID string) error {
 	if t == nil || t.OwnerID == playerID || m.isHQ(t) {
 		return ErrBadTarget
 	}
-	m.wound(t, 1)
+	dmg := 1
+	if !m.playerHasScoper(playerID) {
+		dmg -= m.anyArmorReduce(t)
+	}
+	if dmg > 0 {
+		m.wound(t, dmg)
+	}
 	return nil
+}
+
+func (m *Match) anyArmorReduce(t *BoardTile) int {
+	def := m.defOf(t)
+	if def == nil {
+		return 0
+	}
+	if len(def.ComponentsOf(tile.CompArmor)) > 0 {
+		return 1
+	}
+	return 0
 }
 
 func (m *Match) playAirStrike(q, r *int) error {
@@ -158,11 +165,12 @@ func (m *Match) playAirStrike(q, r *int) error {
 		}
 	}
 	for _, h := range area {
-		t := m.Board[key(h.Q, h.R)]
-		if t == nil || m.isHQ(t) {
-			continue
+		for _, t := range m.tilesAt(h.Q, h.R) {
+			if m.isHQ(t) {
+				continue
+			}
+			m.wound(t, 1)
 		}
-		m.wound(t, 1)
 	}
 	return nil
 }
@@ -182,9 +190,11 @@ func (m *Match) playGrenade(playerID, targetID string) error {
 
 func (m *Match) wound(t *BoardTile, n int) {
 	if m.tryMedic(t) {
+		m.appendLog("Medic absorbs wound on %s", shortDefID(t.DefID))
 		return
 	}
 	t.Wounds += n
+	m.appendLog("%s takes %d wound(s)", shortDefID(t.DefID), n)
 	if t.Wounds >= 1+m.toughness(t) {
 		m.destroy(t)
 	}
@@ -234,7 +244,8 @@ func (m *Match) moduleLinksTo(mod, target *BoardTile) bool {
 }
 
 func (m *Match) destroy(t *BoardTile) {
-	delete(m.Board, key(t.Q, t.R))
+	m.appendLog("%s destroyed", shortDefID(t.DefID))
+	m.removeTile(t)
 	if p := m.player(t.OwnerID); p != nil {
 		p.Discard = append(p.Discard, TileInst{ID: t.ID, DefID: t.DefID})
 	}
@@ -274,12 +285,7 @@ func (m *Match) hqTile(playerID string) *BoardTile {
 }
 
 func (m *Match) boardByID(id string) *BoardTile {
-	for _, t := range m.Board {
-		if t.ID == id {
-			return t
-		}
-	}
-	return nil
+	return m.Board[id]
 }
 
 func (m *Match) adjacentToFriendly(playerID string, q, r int) bool {

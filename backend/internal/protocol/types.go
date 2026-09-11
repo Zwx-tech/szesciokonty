@@ -87,6 +87,28 @@ type PlayInstant struct {
 	R            *int   `json:"r,omitempty"`
 	Facing       *int   `json:"facing,omitempty"`
 	TargetTileID string `json:"targetTileId,omitempty"`
+	PassengerID  string `json:"passengerTileId,omitempty"`
+}
+
+type UseMobility struct {
+	V           int    `json:"v"`
+	Type        string `json:"type"` // use_mobility
+	TileID      string `json:"tileId"`
+	Q           *int   `json:"q,omitempty"`
+	R           *int   `json:"r,omitempty"`
+	Facing      *int   `json:"facing,omitempty"`
+	PassengerID string `json:"passengerTileId,omitempty"`
+}
+
+type UseRecon struct {
+	V    int    `json:"v"`
+	Type string `json:"type"` // use_recon
+}
+
+type UseQuartermaster struct {
+	V      int    `json:"v"`
+	Type   string `json:"type"` // use_quartermaster
+	TileID string `json:"tileId"`
 }
 
 type EndTurn struct {
@@ -147,21 +169,27 @@ type Hex struct {
 }
 
 type BoardTile struct {
-	ID      string     `json:"id"`
-	DefID   string     `json:"defId"`
-	Kind    string     `json:"kind"`
-	OwnerID string     `json:"ownerId"`
-	Q       int        `json:"q"`
-	R       int        `json:"r"`
-	Facing  int        `json:"facing"`
-	Wounds  int        `json:"wounds"`
-	Edges   []EdgeMark `json:"edges,omitempty"`
+	ID                   string     `json:"id"`
+	DefID                string     `json:"defId"`
+	Kind                 string     `json:"kind"`
+	OwnerID              string     `json:"ownerId"`
+	Q                    int        `json:"q"`
+	R                    int        `json:"r"`
+	Facing               int        `json:"facing"`
+	Wounds               int        `json:"wounds"`
+	HP                   int        `json:"hp,omitempty"`
+	MaxHP                int        `json:"maxHp,omitempty"`
+	Netted               bool       `json:"netted,omitempty"`
+	EffectiveInitiatives []int      `json:"effectiveInitiatives,omitempty"`
+	Edges                []EdgeMark `json:"edges,omitempty"`
+	MobilityAvailable    bool       `json:"mobilityAvailable,omitempty"`
 }
 
-// EdgeMark is an absolute board-side icon (0..5) for rendering.
+// EdgeMark is an absolute board-side icon (0..5) for rendering / inspect.
 type EdgeMark struct {
-	Dir  int    `json:"dir"`
-	Kind string `json:"kind"` // melee | ranged | net
+	Dir      int    `json:"dir"`
+	Kind     string `json:"kind"` // melee | ranged | net | armor | module_link
+	Strength int    `json:"strength,omitempty"`
 }
 
 type HandTile struct {
@@ -174,9 +202,11 @@ type PlayerView struct {
 	ID           string     `json:"id"`
 	Army         Army       `json:"army"`
 	HQHP         int        `json:"hqHp"`
-	Hand         []HandTile `json:"hand"`
+	Hand         []HandTile `json:"hand,omitempty"`
+	HandCount    int        `json:"handCount"`
 	DeckCount    int        `json:"deckCount"`
 	DiscardCount int        `json:"discardCount"`
+	Discard      []HandTile `json:"discard,omitempty"` // viewer-only
 }
 
 type MatchResult struct {
@@ -184,15 +214,35 @@ type MatchResult struct {
 	Draw     bool   `json:"draw,omitempty"`
 }
 
+// BattleStep is one initiative phase (or extra-attack pass) for client playback.
+type BattleStep struct {
+	Initiative int            `json:"initiative"` // -1 = extra attacks
+	Label      string         `json:"label"`
+	Board      []BoardTile    `json:"board"`
+	HQHP       map[string]int `json:"hqHp"`
+	Log        []string       `json:"log"`
+}
+
+type BattleReplay struct {
+	Steps []BattleStep `json:"steps"`
+}
+
 type MatchState struct {
-	V                 int          `json:"v"`
-	Type              string       `json:"type"` // match_state
-	Phase             MatchPhase   `json:"phase"`
-	TurnPlayerID      string       `json:"turnPlayerId,omitempty"`
-	MustDiscard       bool         `json:"mustDiscard"`
-	UnluckyAvailable  bool         `json:"unluckyAvailable"`
-	Board             []BoardTile  `json:"board"`
-	Players           []PlayerView `json:"players"`
-	LegalHexes        []Hex        `json:"legalHexes,omitempty"`
-	Result            *MatchResult `json:"result,omitempty"`
+	V                      int           `json:"v"`
+	Type                   string        `json:"type"` // match_state
+	Phase                  MatchPhase    `json:"phase"`
+	TurnPlayerID           string        `json:"turnPlayerId,omitempty"`
+	MustDiscard            bool          `json:"mustDiscard"`
+	UnluckyAvailable       bool          `json:"unluckyAvailable"`
+	Board                  []BoardTile   `json:"board"`
+	Players                []PlayerView  `json:"players"`
+	LegalHexes             []Hex         `json:"legalHexes,omitempty"`
+	Result                 *MatchResult  `json:"result,omitempty"`
+	Log                    []string      `json:"log,omitempty"`
+	EndMode                string        `json:"endMode,omitempty"`
+	TieTurnsLeft           int           `json:"tieTurnsLeft,omitempty"`
+	Replay                 *BattleReplay `json:"replay,omitempty"`
+	ReconPeek              []string      `json:"reconPeek,omitempty"`
+	ReconAvailable         bool          `json:"reconAvailable,omitempty"`
+	QuartermasterAvailable bool          `json:"quartermasterAvailable,omitempty"`
 }

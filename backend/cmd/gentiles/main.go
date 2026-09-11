@@ -87,10 +87,12 @@ func generateTileSvg(def *tile.Def, army protocol.Army) string {
 		return tb.SvgString()
 	}
 
-	// Edge marks: attacks, nets, and module links (draw order via ComponentPriority).
+	// Edge marks: armor, nets, attacks, line wound, module links.
 	var tileComponents []tile.Component
+	tileComponents = append(tileComponents, def.ComponentsOf(tile.CompArmor)...)
 	tileComponents = append(tileComponents, def.ComponentsOf(tile.CompNet)...)
 	tileComponents = append(tileComponents, def.ComponentsOf(tile.CompAttack)...)
+	tileComponents = append(tileComponents, def.ComponentsOf(tile.CompSpecial)...)
 	tileComponents = append(tileComponents, def.ComponentsOf(tile.CompModuleLink)...)
 	sort.Slice(tileComponents, func(i, j int) bool {
 		return ComponentPriority(tileComponents[i]) < ComponentPriority(tileComponents[j])
@@ -101,7 +103,11 @@ func generateTileSvg(def *tile.Def, army protocol.Army) string {
 		if params.EdgeShape == ShapeHidden {
 			continue
 		}
-		for _, side := range edge.Dirs {
+		dirs := edge.Dirs
+		if len(dirs) == 0 {
+			dirs = params.Dirs
+		}
+		for _, side := range dirs {
 			tb.CreateEdge(side, params)
 		}
 	}
@@ -114,6 +120,8 @@ func generateTileSvg(def *tile.Def, army protocol.Army) string {
 // ComponentPriority: lower numbers are drawn first (underneath).
 func ComponentPriority(component tile.Component) int {
 	switch component.Type {
+	case tile.CompArmor:
+		return componentDrawOrder["barrier"]
 	case tile.CompNet:
 		return componentDrawOrder["net"]
 	case tile.CompAttack:
@@ -121,6 +129,11 @@ func ComponentPriority(component tile.Component) int {
 			return componentDrawOrder["ranged"]
 		}
 		return componentDrawOrder["melee"]
+	case tile.CompSpecial:
+		if component.ID == tile.SpecialLineWound {
+			return componentDrawOrder["line_wound"]
+		}
+		return 999
 	case tile.CompModuleLink:
 		return componentDrawOrder["link"]
 	default:
@@ -130,6 +143,15 @@ func ComponentPriority(component tile.Component) int {
 
 func getComponentDrawParams(component tile.Component) ComponentDrawParams {
 	switch component.Type {
+	case tile.CompArmor:
+		return ComponentDrawParams{
+			EdgeShape: ShapeBarrier,
+			ScaleX:    barrierScaleX,
+			ScaleY:    barrierScaleY,
+			Fill:      componentFill["barrier"],
+			Stroke:    barrierStroke,
+			StrokeW:   barrierStrokeW,
+		}
 	case tile.CompNet:
 		return ComponentDrawParams{
 			EdgeShape: ShapeTriangle,
@@ -158,6 +180,19 @@ func getComponentDrawParams(component tile.Component) ComponentDrawParams {
 			Stroke:    edgeStroke,
 			StrokeW:   edgeStrokeWidth,
 		}
+	case tile.CompSpecial:
+		if component.ID == tile.SpecialLineWound {
+			return ComponentDrawParams{
+				EdgeShape: ShapeTriangle,
+				ScaleX:    lineWoundScaleX,
+				ScaleY:    lineWoundScaleY,
+				Fill:      componentFill["line_wound"],
+				Stroke:    lineWoundStroke,
+				StrokeW:   lineWoundStrokeWidth,
+				Dirs:      []int{0}, // pierce fires along facing
+			}
+		}
+		return ComponentDrawParams{EdgeShape: ShapeHidden}
 	case tile.CompModuleLink:
 		return ComponentDrawParams{
 			EdgeShape: ShapeLink,

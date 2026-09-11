@@ -1,5 +1,8 @@
 export const ProtocolVersion = 1 as const;
 
+import type { Hex } from "./hex/coords";
+export type { Hex };
+
 export type Army = "red" | "blue" | "green" | "yellow";
 
 export type RoomPhase = "lobby" | "match";
@@ -29,7 +32,19 @@ export type ClientMsg =
       r?: number;
       facing?: number;
       targetTileId?: string;
+      passengerTileId?: string;
     }
+  | {
+      v: 1;
+      type: "use_mobility";
+      tileId: string;
+      q?: number;
+      r?: number;
+      facing?: number;
+      passengerTileId?: string;
+    }
+  | { v: 1; type: "use_recon" }
+  | { v: 1; type: "use_quartermaster"; tileId: string }
   | { v: 1; type: "end_turn" }
   | { v: 1; type: "redraw_unlucky" }
   | { v: 1; type: "rematch" }
@@ -44,8 +59,6 @@ export type Seat = {
   host: boolean;
 };
 
-export type Hex = { q: number; r: number };
-
 export type BoardTile = {
   id: string;
   defId: string;
@@ -55,12 +68,18 @@ export type BoardTile = {
   r: number;
   facing: number;
   wounds: number;
+  hp?: number;
+  maxHp?: number;
+  netted?: boolean;
+  effectiveInitiatives?: number[];
   edges?: EdgeMark[];
+  mobilityAvailable?: boolean;
 };
 
 export type EdgeMark = {
   dir: number;
-  kind: "melee" | "ranged" | "net" | string;
+  kind: "melee" | "ranged" | "net" | "armor" | "module_link" | string;
+  strength?: number;
 };
 
 export type HandTile = { id: string; defId: string; kind: string };
@@ -69,14 +88,28 @@ export type PlayerView = {
   id: string;
   army: Army;
   hqHp: number;
-  hand: HandTile[];
+  hand?: HandTile[];
+  handCount: number;
   deckCount: number;
   discardCount: number;
+  discard?: HandTile[];
 };
 
 export type MatchResult = {
   winnerId?: string;
   draw?: boolean;
+};
+
+export type BattleStep = {
+  initiative: number;
+  label: string;
+  board: BoardTile[];
+  hqHp: Record<string, number>;
+  log: string[];
+};
+
+export type BattleReplay = {
+  steps: BattleStep[];
 };
 
 export type RoomState = {
@@ -101,6 +134,13 @@ export type MatchState = {
   players: PlayerView[];
   legalHexes?: Hex[];
   result?: MatchResult;
+  log?: string[];
+  endMode?: string;
+  tieTurnsLeft?: number;
+  replay?: BattleReplay;
+  reconPeek?: string[];
+  reconAvailable?: boolean;
+  quartermasterAvailable?: boolean;
 };
 
 export type ErrorMsg = {

@@ -265,9 +265,27 @@ func (s *Store) Start(code, playerID string) (*Room, error) {
 	return r, nil
 }
 
-func (s *Store) MatchPlayInstant(code, playerID, tileID string, q, r *int, facing *int, targetTileID string) (*Room, error) {
+func (s *Store) MatchPlayInstant(code, playerID, tileID string, q, r *int, facing *int, targetTileID, passengerTileID string) (*Room, error) {
 	return s.withMatch(code, func(m *match.Match) error {
-		return m.PlayInstant(playerID, tileID, q, r, facing, targetTileID)
+		return m.PlayInstant(playerID, tileID, q, r, facing, targetTileID, passengerTileID)
+	})
+}
+
+func (s *Store) MatchUseMobility(code, playerID, tileID string, q, r *int, facing *int, passengerTileID string) (*Room, error) {
+	return s.withMatch(code, func(m *match.Match) error {
+		return m.UseMobility(playerID, tileID, q, r, facing, passengerTileID)
+	})
+}
+
+func (s *Store) MatchUseRecon(code, playerID string) (*Room, error) {
+	return s.withMatch(code, func(m *match.Match) error {
+		return m.UseRecon(playerID)
+	})
+}
+
+func (s *Store) MatchUseQuartermaster(code, playerID, tileID string) (*Room, error) {
+	return s.withMatch(code, func(m *match.Match) error {
+		return m.UseQuartermaster(playerID, tileID)
 	})
 }
 
@@ -407,13 +425,13 @@ func (s *Store) broadcastMatchLocked(r *Room) {
 	if r.Match == nil {
 		return
 	}
-	msg := r.Match.Snapshot()
 	for _, p := range r.players() {
 		if p.Client == nil {
 			continue
 		}
-		p.Client.Send(msg)
+		p.Client.Send(r.Match.Snapshot(p.ID))
 	}
+	r.Match.ClearReplay()
 }
 
 func (s *Store) broadcastLocked(r *Room) {

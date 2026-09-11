@@ -5,10 +5,10 @@ import "github.com/Zwx-tech/szesciokonty/backend/internal/protocol"
 type endMode int
 
 const (
-	endNone endMode = iota
-	endAwaitOpponent // last tile drawn; finish turn, then opponent plays once
-	endFinalArmed    // next battle is the Final Battle (or force on opponent end-turn)
-	endTieBreak      // one extra turn each, then one more battle
+	endNone          endMode = iota
+	endAwaitOpponent         // last tile drawn; finish turn, then opponent plays once
+	endFinalArmed            // next battle is the Final Battle (or force on opponent end-turn)
+	endTieBreak              // one extra turn each, then one more battle
 )
 
 func (m *Match) Forfeit(loserID string) {

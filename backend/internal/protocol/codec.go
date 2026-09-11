@@ -6,22 +6,25 @@ import (
 )
 
 const (
-	TypeCreateRoom     = "create_room"
-	TypeJoinRoom       = "join_room"
-	TypeLeave          = "leave"
-	TypeSetArmy        = "set_army"
-	TypeReady          = "ready"
-	TypeStart          = "start"
-	TypeDiscard        = "discard"
-	TypePlace          = "place"
-	TypePlayInstant    = "play_instant"
-	TypeEndTurn        = "end_turn"
-	TypeRedrawUnlucky  = "redraw_unlucky"
-	TypeRematch        = "rematch"
-	TypeReconnect      = "reconnect"
-	TypeError          = "error"
-	TypeRoomState      = "room_state"
-	TypeMatchState     = "match_state"
+	TypeCreateRoom       = "create_room"
+	TypeJoinRoom         = "join_room"
+	TypeLeave            = "leave"
+	TypeSetArmy          = "set_army"
+	TypeReady            = "ready"
+	TypeStart            = "start"
+	TypeDiscard          = "discard"
+	TypePlace            = "place"
+	TypePlayInstant      = "play_instant"
+	TypeUseMobility      = "use_mobility"
+	TypeUseRecon         = "use_recon"
+	TypeUseQuartermaster = "use_quartermaster"
+	TypeEndTurn          = "end_turn"
+	TypeRedrawUnlucky    = "redraw_unlucky"
+	TypeRematch          = "rematch"
+	TypeReconnect        = "reconnect"
+	TypeError            = "error"
+	TypeRoomState        = "room_state"
+	TypeMatchState       = "match_state"
 )
 
 type envelope struct {
@@ -68,6 +71,15 @@ func DecodeClient(data []byte) (ClientMessage, error) {
 		return m, json.Unmarshal(data, &m)
 	case TypePlayInstant:
 		var m PlayInstant
+		return m, json.Unmarshal(data, &m)
+	case TypeUseMobility:
+		var m UseMobility
+		return m, json.Unmarshal(data, &m)
+	case TypeUseRecon:
+		var m UseRecon
+		return m, json.Unmarshal(data, &m)
+	case TypeUseQuartermaster:
+		var m UseQuartermaster
 		return m, json.Unmarshal(data, &m)
 	case TypeEndTurn:
 		var m EndTurn

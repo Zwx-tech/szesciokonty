@@ -1,6 +1,7 @@
 import { GameSocket } from "./net";
 import type {
   Army,
+  BattleReplay,
   ErrorMsg,
   MatchState,
   RoomState,
@@ -124,6 +125,7 @@ export class Session {
       r?: number;
       facing?: number;
       targetTileId?: string;
+      passengerTileId?: string;
     },
   ): void {
     this.clearError();
@@ -135,12 +137,60 @@ export class Session {
       r: opts?.r,
       facing: opts?.facing,
       targetTileId: opts?.targetTileId,
+      passengerTileId: opts?.passengerTileId,
     });
+  }
+
+  useMobility(
+    tileId: string,
+    opts?: {
+      q?: number;
+      r?: number;
+      facing?: number;
+      passengerTileId?: string;
+    },
+  ): void {
+    this.clearError();
+    this.socket.send({
+      v: 1,
+      type: "use_mobility",
+      tileId,
+      q: opts?.q,
+      r: opts?.r,
+      facing: opts?.facing,
+      passengerTileId: opts?.passengerTileId,
+    });
+  }
+
+  useRecon(): void {
+    this.clearError();
+    this.socket.send({ v: 1, type: "use_recon" });
+  }
+
+  useQuartermaster(tileId: string): void {
+    this.clearError();
+    this.socket.send({ v: 1, type: "use_quartermaster", tileId });
   }
 
   rematch(): void {
     this.clearError();
     this.socket.send({ v: 1, type: "rematch" });
+  }
+
+  /**
+   * Take battle replay from the current match once.
+   * Clears `match.replay` so the same snapshot cannot start playback again.
+   */
+  consumeReplay(): BattleReplay | undefined {
+    const replay = this.match?.replay;
+    if (!this.match || !replay?.steps?.length) return undefined;
+    this.match = { ...this.match, replay: undefined };
+    return replay;
+  }
+
+  /** Apply a server message (used by the socket; also handy in tests). */
+  receive(msg: ServerMsg): void {
+    this.handle(msg);
   }
 
   private handle(msg: ServerMsg): void {
@@ -185,7 +235,9 @@ export class Session {
   }
 
   clearError(): void {
+    if (this.error == null) return;
     this.error = null;
+    this.emit();
   }
 
   private emit(): void {

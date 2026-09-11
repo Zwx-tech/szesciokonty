@@ -16,9 +16,6 @@ func (m *Match) Place(playerID, tileID string, q, r, facing int) error {
 	if !hex.OnBoard(hex.Hex{Q: q, R: r}, boardRadius) {
 		return ErrBadHex
 	}
-	if _, taken := m.Board[key(q, r)]; taken {
-		return ErrOccupied
-	}
 
 	switch m.Phase {
 	case protocol.MatchPlaceHQ:
@@ -35,15 +32,18 @@ func (m *Match) placeHQ(playerID string, q, r, facing int) error {
 	if p == nil {
 		return ErrNotYourTurn
 	}
+	if m.hexOccupied(q, r) {
+		return ErrOccupied
+	}
 	for _, t := range m.Board {
 		if t.OwnerID == playerID && t.DefID == p.HQDefID {
 			return ErrHQDone
 		}
 	}
-	m.Board[key(q, r)] = &BoardTile{
+	m.setTile(&BoardTile{
 		ID: newID(), DefID: p.HQDefID, OwnerID: playerID,
 		Q: q, R: r, Facing: facing,
-	}
+	})
 
 	other := m.other(playerID)
 	otherHasHQ := false
@@ -70,6 +70,7 @@ func (m *Match) placeUnit(playerID, tileID string, q, r, facing int) error {
 	if m.MustDiscard {
 		return ErrMustDiscard
 	}
+	m.clearReconPeek()
 	p := m.player(playerID)
 	inst, idx := takeHand(p, tileID)
 	if inst == nil {
@@ -81,14 +82,18 @@ func (m *Match) placeUnit(playerID, tileID string, q, r, facing int) error {
 		p.Hand = append(p.Hand[:idx], rest...)
 		return ErrNotUnit
 	}
+	if m.hexOccupied(q, r) && !m.canDualStackPlace(playerID, def, q, r) {
+		putBack(p, *inst, idx)
+		return ErrOccupied
+	}
 
-	m.Board[key(q, r)] = &BoardTile{
+	m.setTile(&BoardTile{
 		ID: inst.ID, DefID: inst.DefID, OwnerID: playerID,
 		Q: q, R: r, Facing: facing,
-	}
+	})
 	m.UnluckyAvailable = false
 
-	if len(m.Board) >= len(hex.BoardCells(boardRadius)) {
+	if m.allHexesOccupied() {
 		m.resolveBattle()
 	}
 	return nil
@@ -101,6 +106,7 @@ func (m *Match) Discard(playerID, tileID string) error {
 	if m.Phase != protocol.MatchTurn {
 		return ErrBadPhase
 	}
+	m.clearReconPeek()
 	p := m.player(playerID)
 	inst, _ := takeHand(p, tileID)
 	if inst == nil {
@@ -161,6 +167,11 @@ func (m *Match) beginTurn() {
 	m.MustDiscard = false
 	m.UnluckyAvailable = false
 	m.drawnIDs = nil
+	m.mobilityUsed = make(map[string]bool)
+	m.reconUsed = false
+	m.quartermasterUsed = false
+	m.reconPeek = nil
+	m.reconPeekFor = ""
 
 	target := 3
 	switch m.openingStep {
@@ -218,7 +229,6 @@ func (m *Match) checkUnlucky(p *Player) {
 	}
 	m.UnluckyAvailable = true
 }
-
 
 func (m *Match) other(id string) *Player {
 	for _, p := range m.Players {

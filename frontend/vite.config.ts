@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 
 export default defineConfig({
@@ -11,5 +12,9 @@ export default defineConfig({
       "/health": "http://localhost:3000",
       "/api": "http://localhost:3000",
     },
+  },
+  test: {
+    include: ["src/**/*.test.ts"],
+    passWithNoTests: true,
   },
 });

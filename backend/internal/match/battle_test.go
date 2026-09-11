@@ -26,7 +26,7 @@ func put(m *Match, owner, defID string, q, r, facing int) *BoardTile {
 		ID: newID(), DefID: defID, OwnerID: owner,
 		Q: q, R: r, Facing: facing,
 	}
-	m.Board[key(q, r)] = bt
+	m.setTile(bt)
 	return bt
 }
 
@@ -43,6 +43,70 @@ func TestBattleMutualMeleeDestroy(t *testing.T) {
 	if m.Phase != protocol.MatchTurn {
 		t.Fatalf("phase %s", m.Phase)
 	}
+}
+
+func TestBattleReplaySteps(t *testing.T) {
+	m := battleFixture(t, protocol.ArmyRed, protocol.ArmyRed)
+	// Both fighters init 2 — mutual melee at initiative 2.
+	fa := put(m, "a", "red_fighter", 0, 0, 0)
+	fb := put(m, "b", "red_fighter", 1, 0, 3)
+
+	m.resolveBattle()
+
+	if m.pendingReplay == nil || len(m.pendingReplay.Steps) == 0 {
+		t.Fatal("expected battle replay steps")
+	}
+	step := m.pendingReplay.Steps[0]
+	if step.Initiative != 2 {
+		t.Fatalf("first step initiative=%d want 2", step.Initiative)
+	}
+	if step.Label != "Initiative 2" {
+		t.Fatalf("label=%q", step.Label)
+	}
+	// After simultaneous destroy, board step should not still list the fighters.
+	for _, bt := range step.Board {
+		if bt.ID == fa.ID || bt.ID == fb.ID {
+			t.Fatal("fighters should be gone in post-phase snapshot")
+		}
+	}
+	if len(step.Log) == 0 {
+		t.Fatal("step should include hit/destroy log lines")
+	}
+
+	snap := m.Snapshot("a")
+	if snap.Replay == nil || len(snap.Replay.Steps) == 0 {
+		t.Fatal("snapshot should include replay")
+	}
+	m.ClearReplay()
+	snap2 := m.Snapshot("a")
+	if snap2.Replay != nil {
+		t.Fatal("replay should clear")
+	}
+}
+
+func TestBattleReplayMultiInit(t *testing.T) {
+	m := battleFixture(t, protocol.ArmyGreen, protocol.ArmyGreen)
+	// green_heavy has inits 1,2 — acts twice; soft target dies on first hit.
+	put(m, "a", "green_heavy", 0, 0, 0)
+	target := put(m, "b", "green_courier", 1, 0, 3)
+
+	m.resolveBattle()
+
+	if m.pendingReplay == nil {
+		t.Fatal("nil replay")
+	}
+	inits := make([]int, 0, len(m.pendingReplay.Steps))
+	for _, s := range m.pendingReplay.Steps {
+		inits = append(inits, s.Initiative)
+	}
+	if len(inits) < 1 {
+		t.Fatalf("steps=%v", inits)
+	}
+	// Highest initiative first.
+	if inits[0] < 2 {
+		t.Fatalf("expected init 2 first, got %v", inits)
+	}
+	_ = target
 }
 
 func TestBattleArmorBlocksRanged1(t *testing.T) {
@@ -88,9 +152,9 @@ func TestBattleModuleMeleeBonus(t *testing.T) {
 func TestBattleHQNeverDamagesHQ(t *testing.T) {
 	m := battleFixture(t, protocol.ArmyRed, protocol.ArmyRed)
 	// move HQs adjacent facing each other
-	for k, bt := range m.Board {
+	for _, bt := range m.Board {
 		if m.isHQ(bt) {
-			delete(m.Board, k)
+			m.removeTile(bt)
 		}
 	}
 	put(m, "a", "red_hq", 0, 0, 0)
@@ -105,9 +169,9 @@ func TestBattleHQNeverDamagesHQ(t *testing.T) {
 
 func TestBattleHQDamageEndsGame(t *testing.T) {
 	m := battleFixture(t, protocol.ArmyRed, protocol.ArmyRed)
-	for k, bt := range m.Board {
+	for _, bt := range m.Board {
 		if bt.OwnerID == "b" && m.isHQ(bt) {
-			delete(m.Board, k)
+			m.removeTile(bt)
 		}
 	}
 	put(m, "b", "red_hq", 2, 0, 0)

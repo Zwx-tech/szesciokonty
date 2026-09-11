@@ -1,6 +1,8 @@
 package match
 
 import (
+	"fmt"
+
 	"github.com/Zwx-tech/szesciokonty/backend/internal/hex"
 	"github.com/Zwx-tech/szesciokonty/backend/internal/protocol"
 	"github.com/Zwx-tech/szesciokonty/backend/internal/tile"
@@ -19,6 +21,9 @@ type hit struct {
 func (m *Match) resolveBattle() {
 	m.Phase = protocol.MatchBattle
 	m.pendingDestroy = map[string]bool{}
+	m.pendingReplay = &protocol.BattleReplay{}
+	m.appendLog("Battle begins")
+	m.beginStepLog()
 
 	maxInit := 0
 	for _, t := range m.Board {
@@ -31,12 +36,14 @@ func (m *Match) resolveBattle() {
 
 	for phase := maxInit; phase >= 0; phase-- {
 		m.resolvePhase(phase)
+		m.recordBattleStep(phase, fmt.Sprintf("Initiative %d", phase))
 		if m.bothHQDead() {
 			break
 		}
 	}
 	if !m.bothHQDead() {
 		m.resolveExtraAttacks()
+		m.recordBattleStep(-1, "Extra attacks")
 	}
 
 	m.finishBattle()
@@ -181,11 +188,14 @@ func (m *Match) attacksFrom(atk *BoardTile, def *tile.Def) []hit {
 func (m *Match) hitsOnDir(atk *BoardTile, absDir, str int, ranged, pierce bool) []hit {
 	if !ranged && !pierce {
 		n := hex.Neighbor(hex.Hex{Q: atk.Q, R: atk.R}, absDir)
-		t := m.Board[key(n.Q, n.R)]
-		if t == nil || t.OwnerID == atk.OwnerID {
-			return nil
+		var hits []hit
+		for _, t := range m.tilesAt(n.Q, n.R) {
+			if t.OwnerID == atk.OwnerID {
+				continue
+			}
+			hits = append(hits, hit{atk.ID, absDir, t.ID, str, false, false})
 		}
-		return []hit{{atk.ID, absDir, t.ID, str, false, false}}
+		return hits
 	}
 
 	var hits []hit
@@ -195,18 +205,29 @@ func (m *Match) hitsOnDir(atk *BoardTile, absDir, str int, ranged, pierce bool) 
 		if !hex.OnBoard(h, boardRadius) {
 			break
 		}
-		t := m.Board[key(h.Q, h.R)]
-		if t == nil {
+		tiles := m.tilesAt(h.Q, h.R)
+		if len(tiles) == 0 {
 			continue
 		}
 		if pierce {
-			hits = append(hits, hit{atk.ID, absDir, t.ID, str, true, true})
+			for _, t := range tiles {
+				hits = append(hits, hit{atk.ID, absDir, t.ID, str, true, true})
+			}
 			continue
 		}
-		if t.OwnerID == atk.OwnerID {
+		blocked := false
+		for _, t := range tiles {
+			if t.OwnerID == atk.OwnerID {
+				blocked = true
+				break
+			}
+		}
+		if blocked {
 			break
 		}
-		hits = append(hits, hit{atk.ID, absDir, t.ID, str, true, false})
+		for _, t := range tiles {
+			hits = append(hits, hit{atk.ID, absDir, t.ID, str, true, false})
+		}
 		break
 	}
 	return hits
@@ -234,9 +255,12 @@ func (m *Match) applyHits(hits []hit, netted map[string]bool) {
 		}
 		dmg := h.strength
 		if h.ranged {
-			dmg -= m.armorReduce(tgt, h.edge)
-			if dmg < 0 {
-				dmg = 0
+			skipArmor := atk != nil && m.playerHasScoper(atk.OwnerID)
+			if !skipArmor {
+				dmg -= m.armorReduce(tgt, h.edge)
+				if dmg < 0 {
+					dmg = 0
+				}
 			}
 		}
 		if dmg == 0 {
@@ -247,17 +271,29 @@ func (m *Match) applyHits(hits []hit, netted map[string]bool) {
 
 	for _, a := range queue {
 		tgt := m.boardByID(a.h.targetID)
+		atk := m.boardByID(a.h.attackerID)
 		if tgt == nil {
 			continue
 		}
 		if m.tryBattleMedic(tgt, a.h.attackerID, medicUsed, netted) {
+			m.appendLog("Init: medic absorbs hit on %s", shortDefID(tgt.DefID))
 			continue
 		}
 		if m.isHQ(tgt) {
 			hqDmg[tgt.OwnerID] += a.dmg
+			atkName := "?"
+			if atk != nil {
+				atkName = shortDefID(atk.DefID)
+			}
+			m.appendLog("%s hits HQ for %d", atkName, a.dmg)
 			continue
 		}
 		tgt.Wounds += a.dmg
+		atkName := "?"
+		if atk != nil {
+			atkName = shortDefID(atk.DefID)
+		}
+		m.appendLog("%s hits %s for %d", atkName, shortDefID(tgt.DefID), a.dmg)
 		if tgt.Wounds >= 1+m.toughness(tgt) {
 			m.pendingDestroy[tgt.ID] = true
 		}
@@ -342,24 +378,23 @@ func (m *Match) triggerDetonate(t *BoardTile) {
 	if def == nil || !def.HasSpecial(tile.SpecialDetonate) {
 		return
 	}
+	m.appendLog("%s detonates", shortDefID(t.DefID))
 	for f := 0; f < 6; f++ {
 		n := hex.Neighbor(hex.Hex{Q: t.Q, R: t.R}, f)
-		vic := m.Board[key(n.Q, n.R)]
-		if vic == nil {
-			continue
-		}
-		if m.isHQ(vic) {
-			if p := m.player(vic.OwnerID); p != nil {
-				p.HQHP--
-				if p.HQHP < 0 {
-					p.HQHP = 0
+		for _, vic := range m.tilesAt(n.Q, n.R) {
+			if m.isHQ(vic) {
+				if p := m.player(vic.OwnerID); p != nil {
+					p.HQHP--
+					if p.HQHP < 0 {
+						p.HQHP = 0
+					}
 				}
+				continue
 			}
-			continue
-		}
-		vic.Wounds++
-		if vic.Wounds >= 1+m.toughness(vic) {
-			m.pendingDestroy[vic.ID] = true
+			vic.Wounds++
+			if vic.Wounds >= 1+m.toughness(vic) {
+				m.pendingDestroy[vic.ID] = true
+			}
 		}
 	}
 }
@@ -378,11 +413,12 @@ func (m *Match) nettedSet() map[string]bool {
 			for _, rel := range c.Dirs {
 				abs := (src.Facing + rel) % 6
 				n := hex.Neighbor(hex.Hex{Q: src.Q, R: src.R}, abs)
-				tgt := m.Board[key(n.Q, n.R)]
-				if tgt == nil || tgt.OwnerID == src.OwnerID {
-					continue
+				for _, tgt := range m.tilesAt(n.Q, n.R) {
+					if tgt.OwnerID == src.OwnerID {
+						continue
+					}
+					nets = append(nets, edge{src.ID, tgt.ID})
 				}
-				nets = append(nets, edge{src.ID, tgt.ID})
 			}
 		}
 	}

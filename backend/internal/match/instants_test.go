@@ -12,7 +12,7 @@ func TestBattleInstantEndsTurn(t *testing.T) {
 	p := m.player(first)
 	// inject battle into hand
 	battleID := injectInstant(p, "battle")
-	if err := m.PlayInstant(first, battleID, nil, nil, nil, ""); err != nil {
+	if err := m.PlayInstant(first, battleID, nil, nil, nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if m.TurnPlayerID == first {
@@ -48,13 +48,13 @@ func TestSniperKills(t *testing.T) {
 		}
 	}
 	enemyUnit := &BoardTile{ID: "e1", DefID: unitDef, OwnerID: enemy.ID, Q: -1, R: 1}
-	m.Board[key(-1, 1)] = enemyUnit
+	m.setTile(enemyUnit)
 
 	shot := injectInstant(sniperPlayer, "sniper")
-	if err := m.PlayInstant(sniperPlayer.ID, shot, nil, nil, nil, enemyUnit.ID); err != nil {
+	if err := m.PlayInstant(sniperPlayer.ID, shot, nil, nil, nil, enemyUnit.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := m.Board[key(-1, 1)]; ok {
+	if m.boardByID(enemyUnit.ID) != nil {
 		t.Fatal("enemy should be destroyed")
 	}
 }
@@ -80,7 +80,7 @@ func TestMoveUnit(t *testing.T) {
 	destQ, destR := -1, -1
 	for _, c := range [][2]int{{1, 0}, {0, 1}, {-1, 1}, {-1, 0}, {0, -1}, {1, -1}} {
 		nq, nr := unit.Q+c[0], unit.R+c[1]
-		if _, ok := m.Board[key(nq, nr)]; !ok {
+		if !m.hexOccupied(nq, nr) {
 			destQ, destR = nq, nr
 			break
 		}
@@ -91,7 +91,7 @@ func TestMoveUnit(t *testing.T) {
 	p := m.player(first)
 	move := injectInstant(p, "move")
 	fq, fr, ff := destQ, destR, 3
-	if err := m.PlayInstant(first, move, &fq, &fr, &ff, unit.ID); err != nil {
+	if err := m.PlayInstant(first, move, &fq, &fr, &ff, unit.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	moved := m.boardByID(unit.ID)
